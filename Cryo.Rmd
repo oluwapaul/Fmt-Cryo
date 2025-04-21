@@ -1,0 +1,1256 @@
+---
+title: "FMT_Cryo"
+author: "Paul Oladele"
+date: "2024-03-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Let us load set the working directory and load the libraries that we need
+
+```{r packages}
+setwd("~/.")
+
+library(ggplot2)
+library(dplyr)
+library(summarytools)
+library(ggfortify)
+library(stringr)
+library(tidyr)
+library(tidyverse)
+library(lsmeans)
+library(multcomp)
+library(emmeans)
+library(qiime2R)
+library(phyloseq)
+
+```
+
+
+```{r Total and viable bacterial cell count}
+# Total and viable bacterial cell count
+
+setwd("~/.")
+
+cryo <- read.table("cryo.txt", header=TRUE, sep="\t")
+str(cryo)
+
+cryo$trt <- factor(cryo$trt, levels = c("Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+
+M_total <-  lm(total ~ trt + rep, data = cryo) 
+summary.aov(M_total)
+summary(M_total)
+qqPlot(t1$residuals)
+shapiro.test(residuals(t1))
+bartlett.test(observed_features ~ Cryoprotectant, data = meta_total)
+M_total_means <- emmeans(M_total, ~trt) 
+M_total_means_dataframe <- data.frame(M_total_means)
+emm_t1<- emmeans(t1, "Cryoprotectant")
+update(pairs(emm_t1), by = NULL, adjust = "Tukey")
+
+ggplot(data = M_total_means_dataframe, aes(x = trt, y = emmean, colour = trt)) +   geom_point(size = 2) + geom_errorbar(aes(ymin =emmean - SE, ymax = emmean + SE), width = 0.2) + scale_color_brewer(palette = "Dark2") + guides(colour=FALSE) + theme_classic(base_size = 16) + ylab ("Number of total cell (10^10)") + xlab ("Cryoprotectant")
+ggsave(paste0("total_cells", ".png"), height=6, width=7, device="png") # save a PNG 3 inches by 4 inches
+
+
+M_viable <-  lm(viable ~ trt + rep, data = cryo) 
+summary.aov(M_viable)
+summary(M_viable)
+M_viable_means <- emmeans(M_viable, ~trt) 
+M_viable_means_dataframe <- data.frame(M_viable_means)
+
+ggplot(data = M_viable_means_dataframe, aes(x = trt, y = emmean, colour = trt)) +   geom_point(size = 2) + geom_errorbar(aes(ymin =emmean - SE, ymax = emmean + SE), width = 0.2) + scale_color_brewer(palette = "Dark2") + guides(colour=FALSE) + theme_classic(base_size = 16) + ylab ("Number of viable cell (10^10)") + xlab ("Cryoprotectant")
+ggsave(paste0("viable_cells", ".png"), height=6, width=7, device="png") # save a PNG 3 inches by 4 inches
+
+```
+
+
+```{r alpha diversity, echo=FALSE}
+#Load metadat
+metadata <- read.table("cryo_metadata.txt", header=TRUE, sep="\t")
+
+#load OTU table
+setwd("~/.")
+otu_table <- read_qza("observed_features_vector.qza")
+#Extract column from OTU table
+otu_table <- otu_table$data %>%
+  dplyr::select(observed_features)
+
+#Load evenness
+evenness <- read_qza("evenness_vector.qza")
+#Extract column from evenness
+evenness <- evenness$data%>%
+  dplyr::select(pielou_evenness)
+
+#Load faith
+faith <- read_qza("faith_pd_vector.qza")
+#Extract column from faith 
+faith <- faith$data%>%
+  dplyr::select(V1,V2)
+#in faith, the sample ID is named a separate colum and not as column name as in other metrics
+colnames(faith) <- c("SampleID","faith")
+
+#create alpha diversity dataframe
+alpha_diversity <- merge(otu_table, evenness, by.x = 0, by.y = 0)
+alpha_diversity <- merge(alpha_diversity, faith, by.x = "Row.names", by.y = "SampleID")
+
+meta <- merge(metadata, alpha_diversity, by.x ="sample.id" , by.y = "Row.names")
+
+str(meta)
+meta$Cryoprotectant <- as.factor(meta$Cryoprotectant)
+meta_viable <- subset(meta, PMA == "Viable")
+meta_total <- subset(meta, PMA == "Total")
+
+#Total
+# Observed features
+meta$observed_features <- as.numeric(meta$observed_features)
+t1 <- lm(observed_features ~ Cryoprotectant, data = meta_total)
+summary(t1)
+anova(t1)
+qqPlot(t1$residuals)
+shapiro.test(residuals(t1))
+bartlett.test(observed_features ~ Cryoprotectant, data = meta_total)
+t1_means <- lsmeans(t1, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_t1<- emmeans(t1, "Cryoprotectant")
+update(pairs(emm_t1), by = NULL, adjust = "Tukey")
+
+
+# evenness
+t2 <- lm(pielou_evenness ~ Cryoprotectant, data = meta_total)
+summary(t2)
+anova(t2)
+qqPlot(t2$residuals)
+shapiro.test(residuals(t2))
+bartlett.test(pielou_evenness ~ Cryoprotectant, data = meta_total)
+t2_means <- lsmeans(t2, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_t2<- emmeans(t2, "Cryoprotectant")
+update(pairs(emm_t2), by = NULL, adjust = "Tukey")
+
+
+# faith
+t3 <- lm(faith ~ Cryoprotectant, data = meta_total)
+summary(t3)
+anova(t3)
+qqPlot(t3$residuals)
+shapiro.test(residuals(t3))
+bartlett.test(faith ~ Cryoprotectant, data = meta_total)
+t3_means <- lsmeans(t3, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_t3<- emmeans(t3, "Cryoprotectant")
+update(pairs(emm_t3), by = NULL, adjust = "Tukey")
+
+
+###################
+meta_viable <- mutate(meta_viable, observed_features2 = log10(observed_features))
+meta_viable <- mutate(meta_viable, pielou_evenness2 = log10(pielou_evenness))
+meta_viable <- mutate(meta_viable, faith2 = log10(faith))
+
+#Viable
+# Observed features
+v1 <- lm(observed_features2 ~ Cryoprotectant, data = meta_viable)
+summary(v1)
+anova(v1)
+qqPlot(v1$residuals)
+shapiro.test(residuals(v1))
+bartlett.test(observed_features2 ~ Cryoprotectant, data = meta_viable)
+v1_means <- lsmeans(v1, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_v1<- emmeans(v1, "Cryoprotectant")
+update(pairs(emm_v1), by = NULL, adjust = "Tukey")
+
+# evenness
+v2 <- lm(pielou_evenness2 ~ Cryoprotectant, data = meta_viable)
+summary(v2)
+anova(v2)
+qqPlot(v2$residuals)
+shapiro.test(residuals(v2))
+
+bartlett.test(pielou_evenness2 ~ Cryoprotectant, data = meta_viable)
+v2_means <- lsmeans(v2, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_v2<- emmeans(v2, "Cryoprotectant")
+update(pairs(emm_v2), by = NULL, adjust = "Tukey")
+
+# faith
+v3 <- lm(faith2 ~ Cryoprotectant, data = meta_viable)
+summary(v3)
+anova(v3)
+qqPlot(v3$residuals)
+shapiro.test(residuals(v3))
+bartlett.test(faith2 ~ Cryoprotectant, data = meta_viable)
+v3_means <- lsmeans(v3, ~ Cryoprotectant)
+# Perform Tukey's HSD test
+emm_v3<- emmeans(v3, "Cryoprotectant")
+update(pairs(emm_v3), by = NULL, adjust = "Tukey")
+
+
+###########
+#T test
+#Get the difference for all alpha diversity metrics
+meta_total$observed_features_diff <- meta_total$observed_features - meta_viable$observed_features
+meta_total$pielou_evenness_diff <- meta_total$pielou_evenness - meta_viable$pielou_evenness
+meta_total$faith_diff <- meta_total$faith - meta_viable$faith
+
+#Fresh
+#Observed_features Fresh
+meta_fresh <- subset(meta, Cryoprotectant == "Fresh")
+shapiro.test(meta_fresh$observed_features)
+bartlett.test(meta_fresh$observed_features ~ meta_fresh$PMA)
+O_f <- t.test(formula = meta_fresh$observed_features ~ meta_fresh$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Fresh
+shapiro.test(meta_fresh$pielou_evenness)
+bartlett.test(meta_fresh$pielou_evenness ~ meta_fresh$PMA)
+E_f <- t.test(formula = meta_fresh$pielou_evenness ~ meta_fresh$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Fresh
+shapiro.test(meta_fresh$faith)
+bartlett.test(meta_fresh$faith ~ meta_fresh$PMA)
+F_f <- t.test(formula = meta_fresh$faith ~ meta_fresh$PMA, paired = TRUE, var.equal = TRUE)
+
+
+#Control
+#Observed_features Control
+meta_control <- subset(meta, Cryoprotectant == "Control")
+#Rep 6 is missing in viable, so I will go ahead and delete in total
+meta_control <- meta_control[-6,]
+shapiro.test(meta_control$observed_features)
+bartlett.test(meta_control$observed_features ~ meta_control$PMA)
+O_c <- t.test(formula = meta_control$observed_features ~ meta_control$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Control
+shapiro.test(meta_control$pielou_evenness)
+bartlett.test(meta_control$pielou_evenness ~ meta_control$PMA)
+E_c <- t.test(formula = meta_control$pielou_evenness ~ meta_control$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Control
+shapiro.test(meta_control$faith)
+bartlett.test(meta_control$faith ~ meta_control$PMA)
+F_c <- t.test(formula = meta_control$faith ~ meta_control$PMA, paired = TRUE, var.equal = TRUE)
+
+# Mannitol
+#Observed_features Mannitol
+meta_mannitol <- subset(meta, Cryoprotectant == "Mannitol")
+shapiro.test(meta_mannitol$observed_features)
+bartlett.test(meta_mannitol$observed_features ~ meta_mannitol$PMA)
+O_m <- t.test(formula = meta_mannitol$observed_features ~ meta_mannitol$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Mannitol
+shapiro.test(meta_mannitol$pielou_evenness)
+bartlett.test(meta_mannitol$pielou_evenness ~ meta_mannitol$PMA)
+E_m <- t.test(formula = meta_mannitol$pielou_evenness ~ meta_mannitol$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Mannitol
+shapiro.test(meta_mannitol$faith)
+bartlett.test(meta_mannitol$faith ~ meta_mannitol$PMA)
+F_m <- t.test(formula = meta_mannitol$faith ~ meta_mannitol$PMA, paired = TRUE, var.equal = TRUE)
+
+
+# Maltodextrin
+#Observed_features Maltodextrin
+meta_maltodextrin <- subset(meta, Cryoprotectant == "Maltodextrin")
+shapiro.test(meta_maltodextrin$observed_features)
+bartlett.test(meta_maltodextrin$observed_features ~ meta_maltodextrin$PMA)
+O_d <- t.test(formula = meta_maltodextrin$observed_features ~ meta_maltodextrin$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Maltodextrin
+shapiro.test(meta_maltodextrin$pielou_evenness)
+bartlett.test(meta_maltodextrin$pielou_evenness ~ meta_maltodextrin$PMA)
+E_d <- t.test(formula = meta_maltodextrin$pielou_evenness ~ meta_maltodextrin$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Maltodextrin
+shapiro.test(meta_maltodextrin$faith)
+bartlett.test(meta_maltodextrin$faith ~ meta_maltodextrin$PMA)
+F_d <- t.test(formula = meta_maltodextrin$faith ~ meta_maltodextrin$PMA, paired = TRUE, var.equal = TRUE)
+
+
+# Trehalose
+#Observed_features Trehalose
+meta_trehalose <- subset(meta, Cryoprotectant == "Trehalose")
+shapiro.test(meta_trehalose$observed_features)
+bartlett.test(meta_trehalose$observed_features ~ meta_trehalose$PMA)
+O_t <- t.test(formula = meta_trehalose$observed_features ~ meta_trehalose$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Trehalose
+shapiro.test(meta_trehalose$pielou_evenness)
+bartlett.test(meta_trehalose$pielou_evenness ~ meta_trehalose$PMA)
+E_t <- t.test(formula = meta_trehalose$pielou_evenness ~ meta_trehalose$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Trehalose
+shapiro.test(meta_trehalose$faith)
+bartlett.test(meta_trehalose$faith ~ meta_trehalose$PMA)
+F_t <- t.test(formula = meta_trehalose$faith ~ meta_trehalose$PMA, paired = TRUE, var.equal = TRUE)
+
+# Malto_Treh
+#Observed_features 	Malto_Treh
+meta_maltotreh <- subset(meta, Cryoprotectant == "Malto_Treh")
+shapiro.test(meta_maltotreh$observed_features)
+bartlett.test(meta_maltotreh$observed_features ~ meta_maltotreh$PMA)
+O_mt <- t.test(formula = meta_maltotreh$observed_features ~ meta_maltotreh$PMA, paired = TRUE, var.equal = TRUE)
+
+#Evenness Malto_Treh
+shapiro.test(meta_maltotreh$pielou_evenness)
+bartlett.test(meta_maltotreh$pielou_evenness ~ meta_maltotreh$PMA)
+E_mt <- t.test(formula = meta_maltotreh$pielou_evenness ~ meta_maltotreh$PMA, paired = TRUE, var.equal = TRUE)
+
+#Faith Malto_Treh
+shapiro.test(meta_maltotreh$faith)
+bartlett.test(meta_maltotreh$faith ~ meta_maltotreh$PMA)
+F_mt <- t.test(formula = meta_maltotreh$faith ~ meta_maltotreh$PMA, paired = TRUE, var.equal = TRUE)
+
+###############
+#Illustration
+meta$Cryoprotectant <- factor(meta$Cryoprotectant, levels = c("Fresh","Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+
+meta$PMA <- factor(meta$PMA, levels = c("Total","Viable"))
+#my_colors <- c('#d8b365', '#5ab4ac')
+my_colors <- c('#ef8a62', '#67a9cf')
+
+#my_colors <- c('#543005', '#8c510a', '#d8b365', '#c7eae5', '#5ab4ac', '#01665e')
+my_colors2 <- c('#e41a1c', '#4daf4a', '#984ea3', '#377eb8', '#ff7f00', '#a65628')
+
+#Observed_features
+cryo_obs <- ggplot(data = meta, aes(x=Cryoprotectant, y=observed_features, color=PMA))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Observed ASVs") + 
+  scale_color_manual(name="PMA", values = my_colors) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_obs", ".pdf"), height=5, width=8, device="pdf") # save a PDF 3
+
+#Facet grid Observed_features
+cryo_obs2 <- ggplot(data = meta, aes(x=Cryoprotectant, y=observed_features, color=Cryoprotectant))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  facet_grid(.~PMA) +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Observed ASVs") + 
+  scale_color_manual(name="Lyoprotectant", values = my_colors2) +
+  theme(axis.text.x = element_text(size =12,color ="black", angle = 90, hjust = 1),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_obs2", ".pdf"), height=5, width=8, device="pdf") # save a PDF 3
+
+
+#Evenness
+cryo_evenness <- ggplot(data = meta, aes(x=Cryoprotectant, y=pielou_evenness, color=PMA))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Pielou's   Evenness") + 
+  scale_color_manual(name="PMA", values = my_colors) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_evenness", ".pdf"), height=5, width=8, device="pdf") # save a PDF 3
+
+#Facet grid Evenness
+cryo_evenness2 <- ggplot(data = meta, aes(x=Cryoprotectant, y=pielou_evenness, color=Cryoprotectant))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  facet_grid(.~PMA) +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Pielou's   Evenness") + 
+  scale_color_manual(name="Lyoprotectant", values = my_colors2) +
+  theme(axis.text.x = element_text(size =12,color ="black", angle = 90, hjust = 1),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_evenness2", ".pdf"), height=5, width=8, device="pdf") # save a PDF 3
+
+
+#Faith
+cryo_faith <- ggplot(data = meta, aes(x=Cryoprotectant, y=faith, color=PMA))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Faith's Phylogenetic Diversity") + 
+  scale_color_manual(name="PMA", values = my_colors) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_faith", ".pdf"), height=5, width=8, device="pdf") # save a PDF 3
+
+#Facet grid Faith
+cryo_faith <- ggplot(data = meta, aes(x=Cryoprotectant, y=faith, color=Cryoprotectant))+
+  geom_boxplot() +
+  #geom_jitter(width=0.2, alpha=0.5) +
+  #geom_point(alpha = 0.3) +
+  theme(legend.position = "top") +
+  facet_grid(.~PMA) +
+  theme_bw() +
+  xlab ("Lyoprotectant") + ylab ("Faith's Phylogenetic Diversity") + 
+  scale_color_manual(name="Lyoprotectant", values = my_colors2) +
+  theme(axis.text.x = element_text(size =12,color ="black", angle = 90, hjust = 1),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("cryo_faith2", ".pdf"), height=5, width=8, device="pdf")
+
+```
+
+```{r beta diversity}
+#Load metadat
+# Bray Curtis
+metadata <- read.table("cryo_metadata.txt", header=TRUE, sep="\t")
+setwd("~/.")
+bc_PCoA<-read_qza("bray_curtis_pcoa_results.qza")
+bc_meta <- bc_PCoA$data$Vectors %>%
+  dplyr::select(SampleID, PC1, PC2) %>%
+  inner_join(metadata, by = c("SampleID" = "sample.id"))
+
+#my_colors2 <- c('#543005', '#8c510a', '#d8b365', '#c7eae5', '#5ab4ac', '#01665e')
+my_colors2 <- c('#e41a1c', '#4daf4a', '#984ea3', '#377eb8', '#ff7f00', '#a65628')
+
+
+bc_meta$Cryoprotectant <- factor(bc_meta$Cryoprotectant, levels = c("Fresh","Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+my_column <- "Cryoprotectant"
+ggplot(bc_meta, aes(x=PC1, y=PC2, color=get(my_column), shape=PMA)) +
+  geom_point(size=4) + #alpha controls transparency and helps when points are overlapping
+  theme_bw() +
+  #xlim(-0.48, 0.36)+
+  #ylim(-0.24,0.14)+
+  xlab(paste0("PC1 (", round(100*bc_PCoA$data$ProportionExplained[1], digits = 2), "%)")) +
+  ylab(paste0("PC2 (", round(100*bc_PCoA$data$ProportionExplained[2], digits = 2), "%)")) +
+  #theme(text=element_text(size=14)) +
+  theme(axis.text.x = element_text(size =18,color ="black"),
+        axis.text.y = element_text (size=18, color ="black"))+
+  theme(axis.title.x = element_text(size =24, color = "black", face = "bold"),
+        axis.title.y = element_text(size =24, color = "black", face = "bold")) +
+  theme(legend.key.size = unit(2, 'cm'), 
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16)) +
+  scale_color_manual(values=my_colors2, name = my_column)
+ggsave(paste0("BC_ellipse_", my_column,".pdf"), height=8, width=12, device="pdf") # save a PDF 5 inches by 7 inches
+
+
+bc_meta_total <- subset(bc_meta, PMA =="Total")
+bc_meta_viable <- subset(bc_meta, PMA =="Viable")
+
+#Total community
+ggplot(bc_meta_total, aes(x=PC1, y=PC2, color=get(my_column))) +
+  geom_point() + #alpha controls transparency and helps when points are overlapping
+  theme_bw() +
+  #xlim(-0.48, 0.36)+
+  #ylim(-0.24,0.14)+
+  xlab(paste0("PC1 (", round(100*bc_PCoA$data$ProportionExplained[1], digits = 2), "%)")) +
+  ylab(paste0("PC2 (", round(100*bc_PCoA$data$ProportionExplained[2], digits = 2), "%)")) +
+  #theme(text=element_text(size=14)) +
+  theme(axis.text.x = element_text(size =18,color ="black"),
+        axis.text.y = element_text (size=18, color ="black"))+
+  theme(axis.title.x = element_text(size =24, color = "black", face = "bold"),
+        axis.title.y = element_text(size =24, color = "black", face = "bold")) +
+  theme(legend.key.size = unit(2, 'cm'), 
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16)) +
+  scale_color_manual(values=my_colors2, name = my_column)
+
+centroids <- aggregate(cbind(PC1,PC2)~get(my_column),bc_meta_total,mean)
+colnames(centroids)[1] <- "Cryoprotectant"
+
+ggplot(bc_meta_total, aes(x=PC1, y=PC2, color=get(my_column))) +
+  geom_point(size=3) + #alpha controls transparency and helps when points are overlapping
+  geom_point(data=centroids, size = 7) +
+  theme_bw() +
+  #xlim(-0.48, 0.36)+
+  #ylim(-0.24,0.14)+
+  stat_ellipse(level = 0.95, type = "t") +
+  #annotate("text", x = -0.12, y = 0.3, label = "P < 0.05",
+   #       color = "black", fontface = 2, size = 4) +
+  xlab(paste0("PC1 (", round(100*bc_PCoA$data$ProportionExplained[1], digits = 2), "%)")) +
+  ylab(paste0("PC2 (", round(100*bc_PCoA$data$ProportionExplained[2], digits = 2), "%)")) +
+  theme(text=element_text(size=14)) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold")) +
+  theme(legend.key.size = unit(2, 'cm'), 
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14)) +
+  scale_color_manual(values=my_colors2, name = my_column)
+ggsave(paste0("BC_ellipse_centroid_total_", my_column,".pdf"), height=6, width=10, device="pdf") # save a PDF 6 inches by 10 inches
+
+
+#Viable community
+ggplot(bc_meta_viable, aes(x=PC1, y=PC2, color=get(my_column))) +
+  geom_point() + #alpha controls transparency and helps when points are overlapping
+  theme_bw() +
+  #xlim(-0.48, 0.36)+
+  #ylim(-0.24,0.14)+
+  xlab(paste0("PC1 (", round(100*bc_PCoA$data$ProportionExplained[1], digits = 2), "%)")) +
+  ylab(paste0("PC2 (", round(100*bc_PCoA$data$ProportionExplained[2], digits = 2), "%)")) +
+  #theme(text=element_text(size=14)) +
+  theme(axis.text.x = element_text(size =18,color ="black"),
+        axis.text.y = element_text (size=18, color ="black"))+
+  theme(axis.title.x = element_text(size =24, color = "black", face = "bold"),
+        axis.title.y = element_text(size =24, color = "black", face = "bold")) +
+  theme(legend.key.size = unit(2, 'cm'), 
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 16)) +
+  scale_color_manual(values=my_colors2, name = my_column)
+
+centroids <- aggregate(cbind(PC1,PC2)~get(my_column),bc_meta_viable,mean)
+colnames(centroids)[1] <- "Cryoprotectant"
+
+ggplot(bc_meta_viable, aes(x=PC1, y=PC2, color=get(my_column))) +
+  geom_point(size=3) + #alpha controls transparency and helps when points are overlapping
+  geom_point(data=centroids, size = 7) +
+  theme_bw() +
+  #xlim(-0.48, 0.36)+
+  #ylim(-0.24,0.14)+
+  #stat_ellipse(level = 0.95, type = "t") +
+  #annotate("text", x = -0.12, y = 0.3, label = "P < 0.05",
+   #       color = "black", fontface = 2, size = 4) +
+  xlab(paste0("PC1 (", round(100*bc_PCoA$data$ProportionExplained[1], digits = 2), "%)")) +
+  ylab(paste0("PC2 (", round(100*bc_PCoA$data$ProportionExplained[2], digits = 2), "%)")) +
+  theme(text=element_text(size=14)) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold")) +
+  theme(legend.key.size = unit(2, 'cm'), 
+        legend.key.height = unit(1, 'cm'),
+        legend.key.width = unit(1, 'cm'),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 14)) +
+  scale_color_manual(values=my_colors2, name = my_column)
+ggsave(paste0("BC_ellipse_centroid_viable_2", my_column,".pdf"), height=6, width=10, device="pdf") # save a PDF 6 inches by 10 inches
+
+```
+
+
+```{r number of cells}
+library(tidyverse)
+library(emmeans)
+
+setwd("~/.")
+
+cryo <- read.table("cryo.txt", header=TRUE, sep="\t")
+str(cryo)
+
+cryo$trt <- factor(cryo$trt, levels = c("Fresh", "Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+
+cryo <- mutate(cryo, total_log2 = log10(total2))
+cryo <- mutate(cryo, viable_log2 = log10(viable2))
+
+M_total <-  lm(total_log2 ~ trt, data = cryo) 
+anova(M_total)
+summary.aov(M_total)
+summary(M_total)
+
+qqPlot(M_total$residuals)
+shapiro.test(residuals(M_total))
+
+bartlett.test(total_log2 ~ trt, data = cryo)
+
+M_total_means <- emmeans(M_total, ~trt) 
+M_total_means_dataframe <- data.frame(M_total_means)
+update(pairs(M_total_means), by = NULL, adjust = "Tukey")
+
+#my_colors3 <- c('#8c510a', '#d8b365', '#c7eae5', '#5ab4ac', '#01665e')
+my_colors3 <- c('#e41a1c', '#4daf4a', '#984ea3', '#377eb8', '#ff7f00', '#a65628')
+
+ggplot(data = M_total_means_dataframe, aes(x = trt, y = emmean, color = trt)) +   
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin =emmean - SE, ymax = emmean + SE), width = 0.2) +        
+  guides(colour=FALSE) + 
+  theme_bw() + 
+  ylab ("Log10 (Total Bacterial Count)") + xlab ("Lyoprotectant") +
+  scale_color_manual(name="Lyoprotectant", values = my_colors3) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("total_cells3", ".png"), height=6, width=7, device="png") # save a PNG 6 inches by 7 inches
+
+
+M_viable <-  lm(viable_log2 ~ trt, data = cryo) 
+#M_viable <-  aov(viable ~ trt, data = cryo) 
+anova(M_viable)
+summary.aov(M_viable)
+summary(M_viable)
+
+qqPlot(M_viable$residuals)
+shapiro.test(residuals(M_viable))
+bartlett.test(viable_log2 ~ trt, data = cryo)
+M_viable_means <- emmeans(M_viable, ~trt) 
+M_viable_means_dataframe <- data.frame(M_viable_means)
+update(pairs(M_viable_means), by = NULL, adjust = "Tukey")
+
+ggplot(data = M_viable_means_dataframe, aes(x = trt, y = emmean, color = trt)) +   
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin =emmean - SE, ymax = emmean + SE), width = 0.2) +
+  guides(colour=FALSE) + 
+  theme_bw() + 
+  ylab ("Log10 (Viable Bacterial Count)") + xlab ("Lyoprotectant") +
+  scale_color_manual(name="Lyoprotectant", values = my_colors3) +
+  theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold"))
+ggsave(paste0("viable_cells3", ".png"), height=6, width=7, device="png") # save a PNG 3 inches by 4 inches
+
+```
+
+```{r}
+#Taxonomy Bar plot
+#Load data
+##Qiime2R method of creating a phyloseq object
+setwd("~/.")
+physeq <- qza_to_phyloseq(
+  features="rarefied_table.qza",
+  tree="rooted-tree.qza",
+  taxonomy = "taxonomy.qza",
+  metadata = "cryo_metadata.txt"
+)
+
+asv_table <- data.frame(otu_table(physeq), check.names = F)
+metadata <- data.frame(sample_data(physeq), check.names = F)
+taxonomy <- data.frame(tax_table(physeq), check.names = F)
+
+#Clean up metadata, slightly
+levels(metadata$Cryoprotectant)
+metadata$Cryoprotectant.ord = factor(metadata$Cryoprotectant, c("Fresh","Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+levels(metadata$Cryoprotectant.ord)
+
+#Clean up taxonomy
+head(taxonomy)
+tax.clean <- taxonomy
+
+tax.clean[is.na(tax.clean)] <- ""
+for (i in 1:nrow(tax.clean)){
+  if (tax.clean[i,2] == ""){
+    kingdom <- paste("Kingdom_", tax.clean[i,1], sep = "")
+    tax.clean[i, 2:7] <- kingdom
+  } else if (tax.clean[i,3] == ""){
+    phylum <- paste("Phylum_", tax.clean[i,2], sep = "")
+    tax.clean[i, 3:7] <- phylum
+  } else if (tax.clean[i,4] == ""){
+    class <- paste("Class_", tax.clean[i,3], sep = "")
+    tax.clean[i, 4:7] <- class
+  } else if (tax.clean[i,5] == ""){
+    order <- paste("Order_", tax.clean[i,4], sep = "")
+    tax.clean[i, 5:7] <- order
+  } else if (tax.clean[i,6] == ""){
+    family <- paste("Family_", tax.clean[i,5], sep = "")
+    tax.clean[i, 6:7] <- family
+  } else if (tax.clean[i,7] == ""){
+    tax.clean$Species[i] <- paste("Genus",tax.clean$Genus[i], sep = "_")
+  }
+}
+
+#Taxa bar plot
+#Assign our edited and formatted tables as variables to be feed into phyloseq
+OTU.physeq = otu_table(as.matrix(asv_table), taxa_are_rows=TRUE)
+tax.physeq = tax_table(as.matrix(tax.clean))    
+meta.physeq = sample_data(metadata)
+
+#We then merge these into an object of class phyloseq.
+physeq_bar_plot = phyloseq(OTU.physeq, tax.physeq, meta.physeq)
+
+
+# Set colors for plotting
+my_colors <- c(
+  '#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c',
+  '#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928', 
+  "#CBD588", "#5F7FC7", "orange","#DA5724", "#508578", "#CD9BCD",
+  "#AD6F3B", "#673770","#D14285", "#652926", "#C84248", 
+  "#8569D5", "#5E738F","#D1A33D", "#8A7C64", "#599861", "gray", "black"
+)
+
+my_colors <- c(
+  "#bebada", "#a6cee3", "#1f78b4", "#b2df8a", "#33a02c", "#fb9a99", "#e31a1c", "#fdbf6f",
+  "#ff7f00", "#cab2d6", "#6a3d9a", "#ffff99", "#b15928", "#8dd3c7", "#ffffb3", "#fb8072",
+  "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#bc80bd", "#ccebc5", "#ffed6f"
+)
+
+my_colors <- c(
+  "#a6cee3", "#1f78b4", "#b2df8a", "#33a02c", "#fb9a99", "#e31a1c", "#fdbf6f", "#ff7f00",
+  "#cab2d6", "#6a3d9a", "#ffff99", "#b15928", "#8dd3c7", "#ffffb3", "#bebada", "#fb8072",
+  "#80b1d3", "#fdb462", "#b3de69", "#fccde5", "#d9d9d9", "#bc80bd", "#ccebc5", "#ffed6f"
+)
+
+#If you want different taxonomic level, find and replace the taxonomic level listed here
+my_level <- c("Phylum", "Family", "Genus")
+my_column <- "Cryoprotectant"  #this is the metadata column that we will use in the taxa barplot
+my_column2 <- "PMA"
+
+abund_filter <- 0.015  # Our abundance threshold
+ml ="Genus"
+
+for(ml in my_level){
+  print(ml)
+  
+  taxa.summary <- physeq_bar_plot %>%
+    tax_glom(taxrank = ml, NArm = FALSE) %>%  # agglomerate at `ml` level
+    transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+    psmelt()  %>%                               # Melt to long format
+    group_by(get(my_column), get(my_column2), get(ml)) %>%
+    summarise(Abundance.average=mean(Abundance)) 
+  taxa.summary <- as.data.frame(taxa.summary)
+  colnames(taxa.summary)[1] <- my_column
+  colnames(taxa.summary)[2] <- my_column2
+  colnames(taxa.summary)[3] <- ml
+  
+  physeq.taxa.max <- taxa.summary %>% 
+    group_by(get(ml)) %>%
+    summarise(overall.max=max(Abundance.average))
+  
+  physeq.taxa.max <- as.data.frame(physeq.taxa.max)
+  colnames(physeq.taxa.max)[1] <- ml
+  
+  # merging the phyla means with the metadata #
+  physeq_meta <- merge(taxa.summary, physeq.taxa.max)
+  
+  
+  physeq_meta_filtered <- filter(physeq_meta, overall.max>abund_filter)
+  #str(physeq_meta_filtered)
+  
+  physeq_meta_filtered$Cryoprotectant = factor(physeq_meta_filtered$Cryoprotectant, c("Fresh","Control", "Mannitol", "Maltodextrin", "Trehalose", "Malto_Treh"))
+  
+  # Plot 
+  ggplot(physeq_meta_filtered, aes(x = get(my_column), y = Abundance.average, fill = get(ml))) + 
+    facet_grid(.~PMA) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    scale_fill_manual(values = my_colors) +
+    # Remove x axis title
+    #theme(axis.title.x = element_blank()) + 
+    ylim(c(0,1)) +
+    guides(fill = guide_legend(reverse = F, keywidth = .5, keyheight = .5, ncol = 1)) +
+    theme(legend.text=element_text(size=8)) +
+    #theme(legend.position="bottom") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(legend.title = element_blank()) +
+    ylab("Relative Abundance") +
+    xlab("Lyoprotectant") +
+      theme(axis.text.x = element_text(size =12,color ="black"),
+        axis.text.y = element_text (size=12, color ="black"))+
+  theme(axis.title.x = element_text(size =16, color = "black", face = "bold"),
+        axis.title.y = element_text(size =16, color = "black", face = "bold")) +
+    ggtitle(paste0(ml, " (>", abund_filter * 100,"%) in at least 1 sample")) 
+  ggsave(paste0("output/", ml, "BarPlot_", my_column, ".png"), height = 5, width = 4)
+}
+
+ggsave(paste0("BarPlot_Genus", ".png"), height=6, width=7, device="png") # save a PNG 3 inches by 4 inches
+
+```
+
+```{r}
+#Ancombc
+#Viable
+#Load the data
+setwd("~/.")
+lfc_viable <- read.table("ancombc_viable/lfc_slice.csv", header=TRUE, sep=",")
+qval_viable <- read.table("ancombc_viable/q_val_slice.csv", header=TRUE, sep=",")
+se_viable <- read.table("ancombc_viable/se_slice.csv", header=TRUE, sep=",")
+
+#Viable Control
+#Create a dataframe for control sample that will contain taxa name, lfc and q-value
+#I want to include only a few column that I needed, i included some colums i did did not need
+#I then deleted them after joing. This is not the most efficient way to do this, you can create a #new dataframe that contains only the columns you need with select.
+
+#This is where I did the joining nusing the merge function. I joined lfc and q-value here
+v_control <- merge(lfc_viable[,1:3], qval_viable[,1:3], by.x = "id", by.y = "id")
+#The next two lines are where i deleted the columns i did not need
+v_control <- v_control[,-2]
+v_control <- v_control[,-3]
+
+#Here i renamed the column name so i can differentiate between different treatments later
+v_control <- v_control %>% 
+  rename("lfc_control" = "CryoprotectantControl.x")
+
+v_control <- v_control %>% 
+  rename("q_val_control" = "CryoprotectantControl.y")
+
+#Here i added standard error to the lfc and q-value i joined earlier. I though I would use std #error to make error bars but eventually did not because it made the plot too clumsy. You can #include error in you plot 
+v_control <- merge(v_control, se_viable[,1:3], by.x = "id", by.y = "id")
+v_control <- v_control[,-4]
+
+v_control <- v_control %>% 
+  rename("se_control" = "CryoprotectantControl")
+
+#Here I filtered to retain only taxa with q-value <= 0.05
+v_control <- filter(v_control, q_val_control <= 0.05)
+
+
+#Viable Mannitol
+#Create a dataframe for mannitol sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+v_mannitol <- merge(lfc_viable[,1:6], qval_viable[,1:6], by.x = "id", by.y = "id")
+v_mannitol <- v_mannitol[,-2:-5]
+v_mannitol <- v_mannitol[,-3:-6]
+
+v_mannitol <- v_mannitol %>% 
+  rename("lfc_mannitol" = "CryoprotectantMannitol.x")
+
+v_mannitol <- v_mannitol %>% 
+  rename("q_val_mannitol" = "CryoprotectantMannitol.y")
+
+v_mannitol <- merge(v_mannitol, se_viable[,1:6], by.x = "id", by.y = "id")
+v_mannitol <- v_mannitol[,-4:-7]
+
+v_mannitol <- v_mannitol %>% 
+  rename("se_mannitol" = "CryoprotectantMannitol")
+
+v_mannitol <- filter(v_mannitol, q_val_mannitol <= 0.05)
+
+
+#Viable Maltodextrin
+#Create a dataframe for maltodextrin sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+v_maltodextrin <- merge(lfc_viable[,1:5], qval_viable[,1:5], by.x = "id", by.y = "id")
+v_maltodextrin <- v_maltodextrin[,-2:-4]
+v_maltodextrin <- v_maltodextrin[,-3:-5]
+
+v_maltodextrin <- v_maltodextrin %>% 
+  rename("lfc_maltodextrin" = "CryoprotectantMaltodextrin.x")
+
+v_maltodextrin <- v_maltodextrin %>% 
+  rename("q_val_maltodextrin" = "CryoprotectantMaltodextrin.y")
+
+v_maltodextrin <- merge(v_maltodextrin, se_viable[,1:5], by.x = "id", by.y = "id")
+v_maltodextrin <- v_maltodextrin[,-4:-6]
+
+v_maltodextrin <- v_maltodextrin %>% 
+  rename("se_maltodextrin" = "CryoprotectantMaltodextrin")
+
+v_maltodextrin <- filter(v_maltodextrin, q_val_maltodextrin <= 0.05)
+
+
+#Viable Trehalose
+#Create a dataframe for trehalose sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+v_trehalose <- merge(lfc_viable[,1:7], qval_viable[,1:7], by.x = "id", by.y = "id")
+v_trehalose <- v_trehalose[,-2:-6]
+v_trehalose <- v_trehalose[,-3:-7]
+
+v_trehalose <- v_trehalose %>% 
+  rename("lfc_trehalose" = "CryoprotectantTrehalose.x")
+
+v_trehalose <- v_trehalose %>% 
+  rename("q_val_trehalose" = "CryoprotectantTrehalose.y")
+
+v_trehalose <- merge(v_trehalose, se_viable[,1:7], by.x = "id", by.y = "id")
+v_trehalose <- v_trehalose[,-4:-8]
+
+v_trehalose <- v_trehalose %>% 
+  rename("se_trehalose" = "CryoprotectantTrehalose")
+
+v_trehalose <- filter(v_trehalose, q_val_trehalose <= 0.05)
+
+
+#Viable Malto_Treh
+#Create a dataframe for maltodextrin-trehalose sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+v_malto_treh <- merge(lfc_viable[,1:4], qval_viable[,1:4], by.x = "id", by.y = "id")
+v_malto_treh <- v_malto_treh[,-2:-3]
+v_malto_treh <- v_malto_treh[,-3:-4]
+
+v_malto_treh <- v_malto_treh %>% 
+  rename("lfc_malto_treh" = "CryoprotectantMalto_Treh.x")
+
+v_malto_treh <- v_malto_treh %>% 
+  rename("q_val_malto_treh" = "CryoprotectantMalto_Treh.y")
+
+v_malto_treh <- merge(v_malto_treh, se_viable[,1:4], by.x = "id", by.y = "id")
+v_malto_treh <- v_malto_treh[,-4:-5]
+
+v_malto_treh <- v_malto_treh %>% 
+  rename("se_malto_treh" = "CryoprotectantMalto_Treh")
+
+v_malto_treh <- filter(v_malto_treh, q_val_malto_treh <= 0.05)
+
+#This is to join all the dataframe we created for each treatment so that all taxa can be included
+#Here we are using full_join so that all taxa can be retained
+Viable <- full_join(v_control, v_mannitol, by = c("id"="id"))
+Viable <- full_join(Viable, v_maltodextrin, by = c("id"="id"))
+Viable <- full_join(Viable, v_trehalose, by = c("id"="id"))
+Viable <- full_join(Viable, v_malto_treh, by = c("id"="id"))
+
+#Some taxa are not differntially abundant in some treatment, those will have NA in lfc and q-value #This will change the NA to zero
+Viable <- Viable %>% replace(is.na(.), 0)
+#Viable[is.na(Viable)] <- 0
+
+#I split the colum that contain the taxa name because i want to use Genus name to make figure
+Viable2 <- separate(data = Viable, col = id, into = c("kingdom", "Phylum", "Class",
+            "Order", "Family", "Genus"), sep = ";", remove = F)
+
+#Three taxa were not were annotated at genus level, I changed those empty rows to the family name
+Viable2[23, "Genus"] <- Viable2[23, "Family"]
+Viable2[44, "Genus"] <- Viable2[44, "Family"]
+Viable2[68, "Genus"] <- Viable2[68, "Family"]
+
+#I created new columns to name if a genera is enriched or depleted based on the lfc
+#There is acolums for each treatment.
+Viable2$Ref_control <- ifelse(Viable2$lfc_control < 0, "Depleted", "Enriched")
+Viable2$Ref_mannitol <- ifelse(Viable2$lfc_mannitol < 0, "Depleted", "Enriched")
+Viable2$Ref_maltodextrin <- ifelse(Viable2$lfc_maltodextrin < 0, "Depleted", "Enriched")
+Viable2$Ref_trehalose <- ifelse(Viable2$lfc_trehalose < 0, "Depleted", "Enriched")
+Viable2$Ref_malto_treh <- ifelse(Viable2$lfc_malto_treh < 0, "Depleted", "Enriched")
+
+write.table(Viable2, file = "ancombc_viable/Viable2.txt",quote = F,sep = '\t', row.names = T, col.names = T)
+
+setwd("~/.")
+Viable2 <- read.table("ancombc_viable/Viable.txt", header=TRUE, sep="")
+
+#This are the two colors i used for making the figures
+my_colors <- c('#ff7f00', '#1f78b4') 
+
+Viable2$Genus <- factor(Viable2$Genus, levels = c("g__Candidatus_Methanomethylophilus", "g__Candidatus_Methanoplasma", "g__uncultured", "g__Methanobrevibacter", "g__Methanosphaera", "g__uncultured2", "g__Megasphaera", "g__Anaerovibrio", "f__Selenomonadaceae", "g__Prevotellaceae_UCG-003", "g__vadinBE97", "g__Acidaminococcus", "g__Mitsuokella", "g__Rikenellaceae_RC9_gut_group", "g__[Eubacterium]_hallii_group", "g__Desulfovibrio", "g__Prevotellaceae_UCG-004", "g__Dialister", "g__Selenomonas", "g__Alloprevotella", "g__Sutterella", "g__Treponema", "g__Chlamydia", "g__Colidextribacter", "g__Blautia", "g__WCHB1-41", "g__Prevotella", "g__uncultured3", "g__Negativibacillus", "g__Brevundimonas", "g__Muribaculaceae", "g__Gastranaerophilales", "g__Collinsella", "g__Slackia", "g__Family_XIII_UCG-001", "g__UCG-008", "g__Clostridia_vadinBB60_group", "g__Dorea", "g__Enterorhabdus", "g__Incertae_Sedis", "g__Mogibacterium", "g__Coprococcus", "g__Lachnospiraceae_ND3007_group", "g__Peptococcus", "g__uncultured4", "g__Ruminococcus", "g__Lactobacillus", "g__Lachnospiraceae_NK3A20_group", "g__Intestinibacter", "g__Romboutsia", "g__Clostridium_sensu_stricto_6", "g__Turicibacter", "g__Corynebacterium", "g__Fusicatenibacter", "g__Holdemanella", "g__Solobacterium", "g__Streptococcus", "g__RF39", "g__[Eubacterium]_ruminantium_group", "f__Oscillospiraceae", "g__Oscillospira", "g__Paraeggerthella", "g__Faecalibacterium", "g__uncultured5", "g__Clostridia_UCG-014", "g__Lachnospiraceae_NK4A136_group", "g__[Eubacterium]_coprostanoligenes_group", "g__NK4A214_group", "g__CAG-352", "g__[Eubacterium]_siraeum_group", "g__Family_XIII_AD3011_group", "g__Clostridium_sensu_stricto_1", "f__Lachnospiraceae", "g__Terrisporobacter"))
+
+
+
+
+Viable2$Genus <- factor(Viable2$Genus, levels = c("g__Terrisporobacter", "f__Lachnospiraceae", "g__Clostridium_sensu_stricto_1", "g__Family_XIII_AD3011_group", "g__[Eubacterium]_siraeum_group", "g__NK4A214_group", "g__CAG-352", "g__[Eubacterium]_coprostanoligenes_group", "g__Lachnospiraceae_NK4A136_group", "g__Clostridia_UCG-014", "g__uncultured5", "g__Faecalibacterium", "g__Paraeggerthella", "g__Oscillospira", "f__Oscillospiraceae", "g__[Eubacterium]_ruminantium_group", "g__RF39",  "g__Streptococcus", "g__Solobacterium", "g__Holdemanella", "g__Fusicatenibacter", "g__Corynebacterium", "g__Turicibacter", "g__Clostridium_sensu_stricto_6", "g__Romboutsia", "g__Intestinibacter", "g__Lachnospiraceae_NK3A20_group", "g__Lactobacillus", "g__Ruminococcus", "g__uncultured4", "g__Peptococcus", "g__Lachnospiraceae_ND3007_group", "g__Coprococcus", "g__Mogibacterium", "g__Incertae_Sedis", "g__Enterorhabdus", "g__Dorea", "g__Clostridia_vadinBB60_group", "g__UCG-008", "g__Family_XIII_UCG-001", "g__Slackia", "g__Collinsella", "g__Gastranaerophilales", "g__Muribaculaceae", "g__Brevundimonas", "g__Negativibacillus", "g__uncultured3", "g__Prevotella", "g__WCHB1-41", "g__Blautia", "g__Colidextribacter", "g__Chlamydia", "g__Treponema", "g__Sutterella", "g__Alloprevotella", "g__Selenomonas", "g__Dialister", "g__Prevotellaceae_UCG-004", "g__Desulfovibrio", "g__[Eubacterium]_hallii_group", "g__Rikenellaceae_RC9_gut_group", "g__Mitsuokella", "g__Acidaminococcus", "g__vadinBE97", "g__Prevotellaceae_UCG-003", "f__Selenomonadaceae", "g__Anaerovibrio", "g__Megasphaera", "g__uncultured2", "g__Methanosphaera", "g__Methanobrevibacter", "g__uncultured", "g__Candidatus_Methanoplasma","g__Candidatus_Methanomethylophilus"))
+
+
+#This is to make the bar plot
+#Control figure 
+Viable_control <- Viable2 %>%
+ ggplot( aes(x=Genus, y=lfc_control)) +
+  geom_col(aes(fill = Ref_control), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-5, 5)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Viable_control <- Viable_control + coord_flip()
+
+#setwd("~/.")
+ggsave("output/Viable_control2.png", height 
+       = 10, width = 8)
+
+#Mannitol fgigure
+Viable_mannitol <- Viable2 %>%
+ ggplot( aes(x=Genus, y=lfc_mannitol)) +
+  geom_col(aes(fill = Ref_mannitol), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-5, 5)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Viable_mannitol <- Viable_mannitol + coord_flip()
+
+ggsave("Viable_mannitol2.png", height 
+       = 10, width = 8)
+
+#Maltodextrin figure
+Viable_maltodextrin <- Viable2 %>%
+ ggplot( aes(x=Genus, y=lfc_maltodextrin)) +
+  geom_col(aes(fill = Ref_maltodextrin), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-5, 5)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Viable_maltodextrin <- Viable_maltodextrin + coord_flip()
+
+ggsave("Viable_maltodextrin2.png", height 
+       = 10, width = 8)
+
+#Trehalose figure
+Viable_trehalose <- Viable2 %>%
+ ggplot( aes(x=Genus, y=lfc_trehalose)) +
+  geom_col(aes(fill = Ref_trehalose), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-5, 5)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Viable_trehalose <- Viable_trehalose + coord_flip()
+
+ggsave("Viable_trehalose2.png", height 
+       = 10, width = 8)
+
+#Maltodextrin-trehalose figure
+Viable_malto_treh <- Viable2 %>%
+ ggplot( aes(x=Genus, y=lfc_malto_treh)) +
+  geom_col(aes(fill = Ref_malto_treh), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-5, 5)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Viable_malto_treh <- Viable_malto_treh + coord_flip()
+
+ggsave("output/Viable_malto_treh2.png", height 
+       = 10, width = 8)
+
+
+#################################
+#Total
+setwd("~/.")
+lfc_viable <- read.table("ancombc_total/lfc_slice.csv", header=TRUE, sep=",")
+qval_viable <- read.table("ancombc_total/q_val_slice.csv", header=TRUE, sep=",")
+se_viable <- read.table("ancombc_total/se_slice.csv", header=TRUE, sep=",")
+
+#Viable Control
+#Create a dataframe for control sample that will contain taxa name, lfc and q-value
+#I want to include only a few column that I needed, i included some colums i did did not need
+#I then deleted them after joing. This is not the most efficient way to do this, you can create a #new dataframe that contains only the columns you need with select.
+
+#This is where I did the joining nusing the merge function. I joined lfc and q-value here
+t_control <- merge(lfc_viable[,1:3], qval_viable[,1:3], by.x = "id", by.y = "id")
+#The next two lines are where i deleted the columns i did not need
+t_control <- t_control[,-2]
+t_control <- t_control[,-3]
+
+#Here i renamed the column name so i can differentiate between different treatments later
+t_control <- t_control %>% 
+  rename("lfc_control" = "CryoprotectantControl.x")
+
+t_control <- t_control %>% 
+  rename("q_val_control" = "CryoprotectantControl.y")
+
+#Here i added standard error to the lfc and q-value i joined earlier. I though I would use std #error to make error bars but eventually did not because it made the plot too clumsy. You can #include error in you plot 
+t_control <- merge(t_control, se_viable[,1:3], by.x = "id", by.y = "id")
+t_control <- t_control[,-4]
+
+t_control <- t_control %>% 
+  rename("se_control" = "CryoprotectantControl")
+
+#Here I filtered to retain only taxa with q-value <= 0.05
+t_control <- filter(t_control, q_val_control <= 0.05)
+
+
+#Viable Mannitol
+#Create a dataframe for mannitol sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+t_mannitol <- merge(lfc_viable[,1:6], qval_viable[,1:6], by.x = "id", by.y = "id")
+t_mannitol <- t_mannitol[,-2:-5]
+t_mannitol <- t_mannitol[,-3:-6]
+
+t_mannitol <- t_mannitol %>% 
+  rename("lfc_mannitol" = "CryoprotectantMannitol.x")
+
+t_mannitol <- t_mannitol %>% 
+  rename("q_val_mannitol" = "CryoprotectantMannitol.y")
+
+t_mannitol <- merge(t_mannitol, se_viable[,1:6], by.x = "id", by.y = "id")
+t_mannitol <- t_mannitol[,-4:-7]
+
+t_mannitol <- t_mannitol %>% 
+  rename("se_mannitol" = "CryoprotectantMannitol")
+
+t_mannitol <- filter(t_mannitol, q_val_mannitol <= 0.05)
+
+
+#Viable Maltodextrin
+#Create a dataframe for maltodextrin sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+t_maltodextrin <- merge(lfc_viable[,1:5], qval_viable[,1:5], by.x = "id", by.y = "id")
+t_maltodextrin <- t_maltodextrin[,-2:-4]
+t_maltodextrin <- t_maltodextrin[,-3:-5]
+
+t_maltodextrin <- t_maltodextrin %>% 
+  rename("lfc_maltodextrin" = "CryoprotectantMaltodextrin.x")
+
+t_maltodextrin <- t_maltodextrin %>% 
+  rename("q_val_maltodextrin" = "CryoprotectantMaltodextrin.y")
+
+t_maltodextrin <- merge(t_maltodextrin, se_viable[,1:5], by.x = "id", by.y = "id")
+t_maltodextrin <- t_maltodextrin[,-4:-6]
+
+t_maltodextrin <- t_maltodextrin %>% 
+  rename("se_maltodextrin" = "CryoprotectantMaltodextrin")
+
+t_maltodextrin <- filter(t_maltodextrin, q_val_maltodextrin <= 0.05)
+
+
+#Viable Trehalose
+#Create a dataframe for trehalose sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+t_trehalose <- merge(lfc_viable[,1:7], qval_viable[,1:7], by.x = "id", by.y = "id")
+t_trehalose <- t_trehalose[,-2:-6]
+t_trehalose <- t_trehalose[,-3:-7]
+
+t_trehalose <- t_trehalose %>% 
+  rename("lfc_trehalose" = "CryoprotectantTrehalose.x")
+
+t_trehalose <- t_trehalose %>% 
+  rename("q_val_trehalose" = "CryoprotectantTrehalose.y")
+
+t_trehalose <- merge(t_trehalose, se_viable[,1:7], by.x = "id", by.y = "id")
+t_trehalose <- t_trehalose[,-4:-8]
+
+t_trehalose <- t_trehalose %>% 
+  rename("se_trehalose" = "CryoprotectantTrehalose")
+
+t_trehalose <- filter(t_trehalose, q_val_trehalose <= 0.05)
+
+
+#Viable Malto_Treh
+#Create a dataframe for maltodextrin-trehalose sample that will contain taxa name, lfc and q-value
+#Every other thing here is similar to what was done earlier
+t_malto_treh <- merge(lfc_viable[,1:4], qval_viable[,1:4], by.x = "id", by.y = "id")
+t_malto_treh <- t_malto_treh[,-2:-3]
+t_malto_treh <- t_malto_treh[,-3:-4]
+
+t_malto_treh <- t_malto_treh %>% 
+  rename("lfc_malto_treh" = "CryoprotectantMalto_Treh.x")
+
+t_malto_treh <- t_malto_treh %>% 
+  rename("q_val_malto_treh" = "CryoprotectantMalto_Treh.y")
+
+t_malto_treh <- merge(t_malto_treh, se_viable[,1:4], by.x = "id", by.y = "id")
+t_malto_treh <- t_malto_treh[,-4:-5]
+
+t_malto_treh <- t_malto_treh %>% 
+  rename("se_malto_treh" = "CryoprotectantMalto_Treh")
+
+t_malto_treh <- filter(t_malto_treh, q_val_malto_treh <= 0.05)
+
+#This is to join all the dataframe we created for each treatment so that all taxa can be included
+#Here we are using full_join so that all taxa can be retained
+Total <- full_join(t_control, t_mannitol, by = c("id"="id"))
+Total <- full_join(Total, t_maltodextrin, by = c("id"="id"))
+Total <- full_join(Total, t_trehalose, by = c("id"="id"))
+Total <- full_join(Total, t_malto_treh, by = c("id"="id"))
+
+#Some taxa are not differntially abundant in some treatment, those will have NA in lfc and q-value #This will change the NA to zero
+Total <- Total %>% replace(is.na(.), 0)
+#Viable[is.na(Viable)] <- 0
+
+#I split the colum tthat contain the taxa name because i want to use Genus name to make figure
+Total2 <- separate(data = Total, col = id, into = c("kingdom", "Phylum", "Class",
+            "Order", "Family", "Genus"), sep = ";", remove = F)
+
+#I created new columns to name if a genera is enriched or depleted based on the lfc
+#There is acolums for each treatment.
+Total2$Ref_control <- ifelse(Total2$lfc_control < 0, "Depleted", "Enriched")
+Total2$Ref_mannitol <- ifelse(Total2$lfc_mannitol < 0, "Depleted", "Enriched")
+Total2$Ref_maltodextrin <- ifelse(Total2$lfc_maltodextrin < 0, "Depleted", "Enriched")
+Total2$Ref_trehalose <- ifelse(Total2$lfc_trehalose < 0, "Depleted", "Enriched")
+Total2$Ref_malto_treh <- ifelse(Total2$lfc_malto_treh < 0, "Depleted", "Enriched")
+
+setwd("~/.")
+write.table(Total2, file = "ancombc_total/Total.txt",quote = F,sep = '\t', row.names = T, col.names = T)
+
+setwd("~/.")
+Total2 <- read.table("ancombc_total/Total.txt", header=TRUE, sep="")
+
+
+#This are the two colors i used for making the figures
+my_colors <- c('#ff7f00', '#1f78b4')
+my_colors <- c('#1f78b4')
+
+Total2$Genus <- factor(Total2$Genus, levels = c("g__Lachnospiraceae_NK4A136_group", "g__[Ruminococcus]_torques_group", "g__UCG-004", "g__Corynebacterium", "g__Pseudoramibacter", "g__Anaerostipes", "g__Bradymonadales", "g__vadinBE97", "g__Gastranaerophilales", "g__Mailhella", "g__Lachnospiraceae_UCG-001", "g__uncultured", "g__Megasphaera", "g__Libanicoccus", "g__Victivallis", "g__Treponema", "g__Anaeroplasma", "g__Blautia", "g__Coprococcus", "g__[Eubacterium]_hallii_group", "g__Ruminococcus", "g__UCG-008", "g__Family_XIII_UCG-001"))
+
+#This is to make the bar plot
+#Control figure 
+Total_control <- Total2 %>%
+ ggplot( aes(x=Genus, y=lfc_control)) +
+  geom_col(aes(fill = Ref_control), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-2, 3)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Total_control <- Total_control + coord_flip()
+
+#setwd("~/Desktop/Tim-Lab/FMT_Study_2/Cryo/Amplicon")
+ggsave("output/Total_control2.png", height 
+       = 7, width = 7)
+
+#Mannitol fgigure
+Total_mannitol <- Total2 %>%
+ ggplot( aes(x=Genus, y=lfc_mannitol)) +
+  geom_col(aes(fill = Ref_mannitol), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-2, 3)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Total_mannitol <- Total_mannitol + coord_flip()
+
+ggsave("output/Total_mannitol2.png", height 
+       = 7, width = 7)
+
+#Maltodextrin figure
+Total_maltodextrin <- Total2 %>%
+ ggplot( aes(x=Genus, y=lfc_maltodextrin)) +
+  geom_col(aes(fill = Ref_maltodextrin), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-2, 3)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Total_maltodextrin <- Total_maltodextrin + coord_flip()
+
+ggsave("Total_maltodextrin2.png", height 
+       = 7, width = 7)
+
+#Trehalose figure
+Total_trehalose <- Total2 %>%
+ ggplot( aes(x=Genus, y=lfc_trehalose)) +
+  geom_col(aes(fill = Ref_trehalose), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-2, 2)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Total_trehalose <- Total_trehalose + coord_flip()
+
+ggsave("Total_trehalose2.png", height 
+       = 7, width = 7)
+
+#Maltodextrin-trehalose figure
+Total_malto_treh <- Total2 %>%
+ ggplot( aes(x=Genus, y=lfc_malto_treh)) +
+  geom_col(aes(fill = Ref_malto_treh), position = "dodge") +
+  scale_fill_manual("Relative to Fresh Sample", values = my_colors) +
+  xlab("Feature ID (Genus)") + ylab("Log Fold Change (LFC)") +
+  ylim(-2, 3)+
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5)) +
+  guides(fill = guide_legend(reverse=TRUE)) +
+  theme_bw()
+
+Total_malto_treh <- Total_malto_treh + coord_flip()
+
+ggsave("output/Total_malto_treh2.png", height 
+       = 7, width = 7)
+
+```
+

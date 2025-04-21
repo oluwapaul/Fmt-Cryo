@@ -1,0 +1,346 @@
+
+sinteractive -A microbiome -t 2:00:00 -n30
+
+# Load module
+module load bioinfo
+module load Qiime/2-2023.2
+
+squeue -A microbiome
+
+#Upload manifest and metadata with scp
+
+#data inport
+qiime tools import \
+--type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path cryo_manifest.txt \
+--input-format PairedEndFastqManifestPhred33V2 \
+--output-path ./output1/demux-paired-end.qza
+
+#Make demux qzv 
+qiime demux summarize \
+  --i-data demux-paired-end.qza \
+  --o-visualization demux-paired-end.qzv
+
+#Download file from cluster to my computer with scp
+
+
+#!/bin/sh -l
+
+#SBATCH --nodes=1                   ##number of requested nodes (a node is a group of CPUs)
+#SBATCH -n 20                    ##number of requested CPUs
+#SBATCH --time=6:00:00             ##time requested
+#SBATCH --job-name cry ##name of job
+#SBATCH -A microbiome                 ##name of the queue you are using. Could be scholar or microbiome if you are on bell
+
+#########################################################################
+
+echo "Start time"
+date +"%d %B %Y %H:%M:%S"
+
+#step 1, cd into the proper directory. This directory must already exist
+
+cd /.
+
+pwd
+
+#step 2, Load Modules
+
+echo "loading bioinfo"
+module load bioinfo
+
+echo "loading qiime2-2022.8"
+module load Qiime/2-2022.8
+
+#step 3, Run the code you want
+
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs ./output1/demux-paired-end.qza \
+  --p-trim-left-f 13 \
+  --p-trim-left-r 13 \
+  --p-trunc-len-f 250 \
+  --p-trunc-len-r 250 \
+  --o-table ./output1/table.qza \
+  --o-representative-sequences ./output1/rep-seqs.qza \
+  --o-denoising-stats ./output1/denoising-stats.qza
+
+echo "End time"
+date +"%d %B %Y %H:%M:%S"
+
+
+squeue -A microbiome
+
+
+#Create a .qzv from the output of denoise
+qiime feature-table summarize \
+  --i-table ./output1/table.qza \
+  --o-visualization ./output1/table.qzv \
+  --m-sample-metadata-file cryo_metadata.txt
+
+#phylogenetic tree
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences ./output1/rep-seqs.qza \
+  --o-alignment ./output1/aligned-rep-seqs.qza \
+  --o-masked-alignment ./output1/masked-aligned-rep-seqs.qza \
+  --o-tree ./output1/unrooted-tree.qza \
+  --o-rooted-tree ./output1/rooted-tree.qza
+
+# rarefaction
+qiime diversity alpha-rarefaction \
+  --i-table ./output1/table.qza \
+  --i-phylogeny ./output1/rooted-tree.qza \
+  --p-max-depth 50000 \
+  --m-metadata-file cryo_metadata.txt \
+  --o-visualization ./output1/alpha-rarefaction.qzv
+
+
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny ./output1/rooted-tree.qza \
+  --i-table ./output1/table.qza \
+  --p-sampling-depth 13924 \
+  --m-metadata-file cryo_metadata.txt \
+  --output-dir ./output1/core-metrics-results
+
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity ./output1/core-metrics-results/observed_features_vector.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --o-visualization ./output1/core-metrics-results/observed_features-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity ./output1/core-metrics-results/faith_pd_vector.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --o-visualization ./output1/core-metrics-results/faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity ./output1/core-metrics-results/evenness_vector.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --o-visualization ./output1/core-metrics-results/evenness-group-significance.qzv
+
+
+
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix ./output1/core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --m-metadata-column Treatment \
+  --o-visualization ./output1/core-metrics-results/bray-curtis-group-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix ./output1/core-metrics-results/weighted_unifrac_distance_matrix.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --m-metadata-column Treatment \
+  --o-visualization ./output1/core-metrics-results/weighted-unifrac-group-significance.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix ./output1/core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --m-metadata-column Treatment \
+  --o-visualization ./output1/core-metrics-results/unweighted-unifrac-group-significance.qzv \
+  --p-pairwise
+
+
+####################################
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-138-99-515-806-nb-classifier.qza \
+  --i-reads ./cryo/output1/rep-seqs.qza \
+  --o-classification ./cryo/output1/taxonomy.qza
+
+
+####################################
+#Collapse taxa to genus level
+qiime taxa collapse \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-level 6 \
+  --o-collapsed-table table-l6.qza
+
+#Filter to separate the column to be compared
+qiime feature-table filter-samples \
+  --i-table ./output1/table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-where "[Malto_Treh]='Yes'" \
+  --o-filtered-table ./output1/MaltoTreh-table-l6.qza
+
+
+qiime feature-table filter-samples \
+  --i-table ./output1/Trehalose-table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-where "[PMA]='Viable'" \
+  --o-filtered-table ./output1/V_Trehalose-table-l6.qza
+
+qiime feature-table filter-samples \
+  --i-table ./output1/Dextrin-table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-where "[PMA]='Viable'" \
+  --o-filtered-table ./output1/V_Dextrin-table-l6.qza
+
+
+
+qiime feature-table filter-samples \
+  --i-table ./output1/table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-where "[PMA]='Viable'" \
+  --o-filtered-table ./output1/V_table-l6.qza
+
+
+qiime feature-table filter-samples \
+  --i-table ./output1/table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-where "[PMA]='Total'" \
+  --o-filtered-table ./output1/T_table-l6.qza
+
+#################################
+# ANCOM-BC differential abundance test
+qiime composition ancombc \
+  --i-table ./output1/V_table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-formula 'Cryoprotectant' \
+  --o-differentials ./output1/ancombc-V.qza
+
+qiime composition ancombc \
+  --i-table ./output1/T_table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-formula 'Cryoprotectant' \
+  --o-differentials ./output1/ancombc-T.qza
+
+qiime composition ancombc \
+  --i-table ./output1/T_Dextrin-table-l6.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-formula 'Cryoprotectant' \
+  --o-differentials ./output1/ancombc-T_Dextrin.qza
+
+#################################
+qiime composition da-barplot \
+  --i-data ancombc-V.qza \
+  --p-significance-threshold 0.005 \
+  --o-visualization da-barplot-V-005.qzv
+
+qiime composition da-barplot \
+  --i-data ancombc-T.qza \
+  --p-significance-threshold 0.005 \
+  --o-visualization da-barplot-T-005.qzv
+
+qiime composition da-barplot \
+  --i-data ancombc-V_Trehalose.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization da-barplot-V_Trehalose.qzv
+
+qiime composition da-barplot \
+  --i-data ancombc-V_Trehalose.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization da-barplot-V_Trehalose.qzv
+
+
+
+
+#!/bin/sh -l
+
+#SBATCH --nodes=1                   ##number of requested nodes (a node is a group of CPUs)
+#SBATCH -n 20                    ##number of requested CPUs
+#SBATCH --time=2:00:00             ##time requested
+#SBATCH --job-name cryo_ancombc ##name of job
+#SBATCH -A microbiome                 ##name of the queue you are using. Could be scholar or microbiome if you are on bell
+
+#########################################################################
+
+echo "Start time"
+date +"%d %B %Y %H:%M:%S"
+
+#step 1, cd into the proper directory. This directory must already exist
+
+cd /.
+
+pwd
+
+#step 2, Load Modules
+
+echo "loading bioinfo"
+module load bioinfo
+
+echo "loading qiime2-2023.2"
+module load Qiime/2-2023.2
+
+#step 3, Run the code you want
+
+#Filter
+qiime feature-table filter-samples \
+  --i-table ./output1/table-l6.qza \
+  --m-metadata-file cryo_metadata3.txt \
+  --p-where "[PMA]='Viable'" \
+  --o-filtered-table ./output1/V_table-l62.qza
+
+
+qiime feature-table filter-samples \
+  --i-table ./output1/table-l6.qza \
+  --m-metadata-file cryo_metadata3.txt \
+  --p-where "[PMA]='Total'" \
+  --o-filtered-table ./output1/T_table-l62.qza
+
+
+#Ancombc
+qiime composition ancombc \
+  --i-table ./output1/V_table-l62.qza \
+  --m-metadata-file cryo_metadata3.txt \
+  --p-formula 'Cryoprotectant' \
+  --o-differentials ./output1/ancombc-V2.qza
+
+qiime composition ancombc \
+  --i-table ./output1/T_table-l62.qza \
+  --m-metadata-file cryo_metadata2.txt \
+  --p-formula 'Cryoprotectant' \
+  --o-differentials ./output1/ancombc-T2.qza
+
+#plot
+qiime composition da-barplot \
+  --i-data ./output1/ancombc-V2.qza \
+  --p-significance-threshold 0.005 \
+  --o-visualization ./output1/da-barplot-V2-005.qzv
+
+qiime composition da-barplot \
+  --i-data ./output1/ancombc-T2.qza \
+  --p-significance-threshold 0.005 \
+  --o-visualization ./output1/da-barplot-T2-005.qzv
+
+qiime composition da-barplot \
+  --i-data ./output1/ancombc-V2.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization ./output1/da-barplot-V2-001.qzv
+
+qiime composition da-barplot \
+  --i-data ./output1/ancombc-T2.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization ./output1/da-barplot-T2-001.qzv
+
+echo "End time"
+date +"%d %B %Y %H:%M:%S"
+
+
+qiime taxa filter-table \
+  --i-table ./output/filtered-table.qza \
+  --i-taxonomy ./output/taxonomy.qza \
+  --p-include p__ \
+  --p-exclude mitochondria,chloroplast \
+  --o-filtered-table ./output/filtered-table2.qza
+
+qiime feature-table summarize \
+  --i-table ./output/filtered-table2.qza \
+  --o-visualization ./output/filtered-table2.qzv \
+  --m-sample-metadata-file fecal_metadata.txt
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-138-99-515-806-nb-classifier.qza \
+  --i-reads ./output/rep-seqs.qza \
+  --o-classification ./output/taxonomy.qza
+
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier silva-138-99-515-806-nb-classifier.qza \
+  --i-reads ./output/rep-seqs.qza \
+  --o-classification ./output/taxonomy.qza
+
+qiime tools extract \
+  --input-path ancombc-T.qza \
+  --output-path ancombc-T
+
