@@ -1,2 +1,0 @@
-Different cryoprotectants were used to pre-treat fecal samples collected from pig before lyophilization. Some of the samples were then treated with propidium monoazide (PMA) before DNA extraction to enable DNA extraction from only viable bacterial cells.
-The Cyo_Qiime script.txt contain the script for sequence processing and analysis in qiime2, Cryo.Rmd contains script for analysis in R and cryo_metadata conatains the sample metadat details.
